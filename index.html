@@ -34,6 +34,8 @@
   --shadow:none; color-scheme:dark;
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+/* ダブルタップでの拡大を防ぐ（2本指での拡大は可能なまま） */
+html,body,button,input,textarea,.keys button{touch-action:manipulation}
 html,body{margin:0;background:var(--bg);color:var(--ink)}
 body{font-family:-apple-system,"Hiragino Sans","Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif;
   font-size:15px;line-height:1.5;padding-bottom:calc(84px + env(safe-area-inset-bottom, 0px));
