@@ -150,6 +150,8 @@ nav.tabs .fab svg{stroke-width:2.2;width:26px;height:26px}
 .pill{font-size:11px;font-weight:600;border-radius:99px;padding:2px 9px;color:#fff;flex:none}
 .pill.caution{background:var(--caution)} .pill.over{background:var(--warn)}
 .set.sub{padding-top:0}
+.savebtn{display:block;width:100%;text-align:left}
+.savebtn .line2 + .line2{margin-top:0}
 .set:has(+ .set.sub){border-bottom:0;padding-bottom:4px}
 </style>
 </head>
@@ -174,7 +176,7 @@ nav.tabs .fab svg{stroke-width:2.2;width:26px;height:26px}
 'use strict';
 /* ========== データ ========== */
 const KEY = 'kakeiNote.data';
-const VERSION = 3;   // v2：口座残高（bank）と緊急用の額（settings.reserve）／v3：カテゴリの繰り越し（carryFrom）
+const VERSION = 4;   // v2：口座残高（bank）と緊急用の額（settings.reserve）／v3：カテゴリの繰り越し（carryFrom）／v4：引っ越し資金の記録（savings）
 
 function defaultData(){
   return {
@@ -205,6 +207,7 @@ function defaultData(){
     entries: [],              // {id,date,amount,catId,paymentId,memo,fixedId?,createdAt}
     incomes: {},              // '2026-10-15' : 100000（期間の開始日がキー）
     bank: {balance:null, asOf:null},   // 引き落とし口座の残高と、確認した日
+    savings: {},              // 引っ越し資金：'2026-10-15' : 14000（期間の開始日がキー。その期間に貯金へ回した額）
     settings: {theme:'auto', reserve:30000}   // reserve：緊急用として手をつけない額
   };
 }
@@ -217,6 +220,7 @@ function migrate(d){
   d.settings = Object.assign({}, base.settings, d.settings||{});
   // v1 → v2：bank と settings.reserve は上の補完で追加される（既存の記録はそのまま）
   if(!d.bank || typeof d.bank!=='object') d.bank = {balance:null, asOf:null};
+  if(!d.savings || typeof d.savings!=='object') d.savings = {};
   // v2 → v3：美容院・部屋づくりの繰り越しを、移行した日の期間から開始
   if((d.version||1) < 3){
     for(const c of d.categories) if((c.id==='hair' || c.id==='room') && !c.carryFrom) c.carryFrom = periodOf(todayStr());
@@ -331,6 +335,69 @@ function periodNav(){
     <button data-act="next" aria-label="次の期間">›</button></div>`;
 }
 
+/* ========== 貯金（引っ越し資金） ========== */
+const MOVE_END = '2028-03-14', MOVE_LAST = '2028-02-15', MOVE_LABEL = '2028年3月';
+function savingBudget(){ const c = data.categories.find(c=>c.group==='save'); return c ? (c.budget||0) : 0; }
+function movingTotal(){ return Object.values(data.savings).reduce((a,v)=>a+(Number(v)||0),0); }
+function projection(){
+  const cur = periodOf(todayStr()), keys = Object.keys(data.savings).sort(), total = movingTotal();
+  // これから記録する期間（今の期間が未記録なら含む）〜2028/2/15開始の期間
+  let remain = 0;
+  for(let p = cur; p <= MOVE_LAST; p = shiftPeriod(p,1)) if(data.savings[p]==null) remain++;
+  // 実績の平均：最初に記録した期間〜今の期間（記録のない過去の期間は0円として数える。今の期間は記録済みのときだけ数える）
+  let avg = null;
+  if(keys.length){
+    let n = 0;
+    for(let p = keys[0]; p <= cur; p = shiftPeriod(p,1)) if(p < cur || data.savings[p]!=null) n++;
+    avg = n ? total/n : null;
+  }
+  return {total, remain, byTarget: total + savingBudget()*remain, byAvg: avg==null ? null : total + avg*remain, avg};
+}
+
+function savingsChart(){
+  const keys = Object.keys(data.savings).sort(); if(!keys.length) return '';
+  const cur = periodOf(todayStr()), pts = [];
+  let sum = 0;
+  for(let p = keys[0]; p <= (keys[keys.length-1] > cur ? keys[keys.length-1] : cur); p = shiftPeriod(p,1)){ sum += Number(data.savings[p])||0; pts.push({p, sum}); }
+  const W=320, H=120, pad=4, n=pts.length, max=Math.max(...pts.map(x=>x.sum),1), bw=Math.min(28,(W-pad*2)/n-4);
+  const bars = pts.map((x,i)=>{ const h=Math.max(1,(H-22)*x.sum/max), xx=pad+i*((W-pad*2)/n)+(((W-pad*2)/n)-bw)/2;
+    return `<rect x="${xx.toFixed(1)}" y="${(H-18-h).toFixed(1)}" width="${bw.toFixed(1)}" height="${h.toFixed(1)}" rx="3" fill="var(--wood)" opacity="${x.p===cur?1:.7}"/>`; }).join('');
+  const lab = (i)=>{ const {m}=parts(pts[i].p); const xx=pad+i*((W-pad*2)/n)+((W-pad*2)/n)/2; return `<text x="${xx.toFixed(1)}" y="${H-4}" font-size="10" text-anchor="middle" fill="var(--sub)">${m}月</text>`; };
+  const labels = [0, n-1].filter((v,i,a)=>a.indexOf(v)===i).map(lab).join('');
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="引っ越し資金の推移">${bars}${labels}</svg>`;
+}
+
+function openSavings(){
+  sheetMode = 'savingsView'; form = null;
+  const pr = projection(), cur = periodOf(todayStr()), keys = Object.keys(data.savings).sort().reverse();
+  openSheet(`
+    <div class="shd"><b>貯金</b><button data-act="close">閉じる</button></div>
+    <div class="card sum">
+      <div><div class="k">引っ越し資金</div><div class="v">${yen(pr.total)}</div></div>
+      <div><div class="k">緊急用（手をつけない）</div><div class="v">${yen(data.settings.reserve||0)}</div></div>
+      <div class="big"><div class="k">${MOVE_LABEL}（3/14）時点の見込み</div>
+        <div class="row" style="padding:6px 0"><div class="line1"><span>目標 ${yen(savingBudget())} を続けた場合</span><span class="rem">${yen(pr.byTarget)}</span></div></div>
+        <div class="row" style="padding:6px 0"><div class="line1"><span>${pr.avg==null?'これまでの平均で続けた場合':`これまでの平均 ${yen(pr.avg)} で続けた場合`}</span><span class="rem">${pr.byAvg==null?'—':yen(pr.byAvg)}</span></div></div>
+        <div class="note">残り ${pr.remain} 期間分（未記録の期間）で計算しています。</div></div>
+    </div>
+    <div class="acts" style="margin:0 0 12px"><button class="btn" data-act="saving" data-p="${cur}">${data.savings[cur]==null?'この期間の貯金を記録':'この期間の貯金を修正'}</button></div>
+    ${keys.length ? `<div class="lbl2">推移（累計）</div><div class="card" style="padding:10px 12px">${savingsChart()}</div>
+    <div class="lbl2">記録</div><div class="card" style="padding-top:2px;padding-bottom:2px">${keys.map(p=>`<button class="ent" data-act="saving" data-p="${p}"><span class="dot"></span><span class="mid"><div>${periodLabel(p)}</div></span><span class="amt">${yen(data.savings[p])}</span></button>`).join('')}</div>` : '<div class="empty">まだ記録がありません</div>'}
+    <div class="note">引っ越し資金は引き落とし口座にある前提で、カード画面の「使えるお金」から差し引いています。</div>`);
+}
+
+function openSaving(p){
+  const v = data.savings[p];
+  form = {amount: String(v!=null ? v : savingBudget()), period: p, fresh: true};
+  sheetMode = 'saving';
+  openSheet(`
+    <div class="shd"><b>貯金（${periodLabel(p)}）</b><button data-act="savings">戻る</button></div>
+    <div class="amtdisp" id="amt">${amtText(form.amount)}<small>円</small></div>
+    ${keypad()}
+    <div class="note">この期間に引っ越し資金へ回した額です。初期値は毎期間の目標額です。</div>
+    <div class="acts">${v!=null?'<button class="btn danger" data-act="savClear">未記録に戻す</button>':''}<button class="btn" data-act="saveSaving">保存</button></div>`);
+}
+
 /* ========== 繰り越し ========== */
 // 繰り越しありのカテゴリは、開始期間〜前の期間の「予算−使った額」を合計して今の期間に足す（超過分は差し引く・上限なし）
 function usedIn(catId, p){ const e=periodEnd(p); return data.entries.reduce((a,x)=>a+(x.catId===catId && x.date>=p && x.date<=e ? x.amount : 0),0); }
@@ -383,8 +450,10 @@ function renderHome(){
     for(const c of cs){
       const u = used[c.id]||0, cr = g==='var' ? carryOf(c, state.period) : 0, b = (c.budget||0) + cr;
       if(g==='save'){
-        h += `<div class="row"><div class="line1"><span class="name">${esc(c.name)}</span><span class="rem">${yen(b)}</span></div>
-          <div class="line2"><span>毎月の目標額</span><span>記録機能は第4段階で追加</span></div></div>`;
+        const sv = data.savings[state.period];
+        h += `<button class="row savebtn" data-act="savings"><div class="line1"><span class="name">引っ越し資金</span><span class="rem">${yen(movingTotal())}</span></div>
+          <div class="line2"><span>この期間の貯金：${sv==null?'<span class="tap">未記録</span>':yen(sv)}</span><span>目標 ${yen(b)}／期間</span></div>
+          <div class="line2"><span>${MOVE_LABEL}の見込み</span><span>${yen(projection().byTarget)}</span></div></button>`;
         continue;
       }
       if(!b && !c.carryFrom){
@@ -467,7 +536,7 @@ function forecast(){
   // PayPay・現金など（残高確認後に記録した分）
   const other = data.entries.filter(e=>e.paymentId!==CARD_ID && e.date>after && e.date<=B).reduce((a,e)=>a+e.amount,0);
   if(other){ v -= other; lines.push({label:'PayPay・現金など', amount:-other, note:''}); }
-  return {B, ready:true, after, value:v, usable:v-(data.settings.reserve||0), lines};
+  return {B, ready:true, after, value:v, usable:v-(data.settings.reserve||0)-movingTotal(), lines};
 }
 
 function renderForecast(){
@@ -478,8 +547,8 @@ function renderForecast(){
       <div class="acts" style="margin-top:4px"><button class="btn" data-act="bank">残高を入力</button></div></div>`;
   }
   h += `<div class="sum">
-    <div class="big" style="border-top:0;padding-top:0"><div class="k">使えるお金（緊急用 ${yen(rsv)} を除く）</div><div class="v ${f.usable<0?'neg':''}">${yen(f.usable)}</div>
-    ${f.value<0?'<div class="note neg">引き落としに残高が足りない見込みです</div>':f.usable<0?'<div class="note neg">緊急用の貯金に手をつける見込みです</div>':''}</div></div>
+    <div class="big" style="border-top:0;padding-top:0"><div class="k">使えるお金（緊急用 ${yen(rsv)}${movingTotal()?`・引っ越し資金 ${yen(movingTotal())}`:''} を除く）</div><div class="v ${f.usable<0?'neg':''}">${yen(f.usable)}</div>
+    ${f.value<0?'<div class="note neg">引き落としに残高が足りない見込みです</div>':f.usable<0?'<div class="note neg">貯金に手をつける見込みです</div>':''}</div></div>
     <div class="row" style="margin-top:6px"><div class="line1"><span class="muted">口座残高（${md(bk.asOf)}時点）</span><button class="rem" data-act="bank"><span class="tap">${yen(bk.balance)}</span></button></div></div>`;
   for(const l of f.lines){
     h += `<div class="row"><div class="line1"><span>${esc(l.label)}${l.note?`<span class="tag">${l.note}</span>`:''}</span><span class="rem ${l.amount<0?'':''}">${l.amount>=0?'+':''}${yen(l.amount)}</span></div></div>`;
@@ -716,6 +785,7 @@ document.addEventListener('click', ev=>{
   if(b.id==='fab'){ openEntry(null); return; }
   if(d.edit){ openEntry(d.edit); return; }
   if(d.key && form){
+    if(form.fresh){ form.fresh=false; if(d.key!=='⌫') form.amount=''; }  // 初期値の入った欄は、最初の数字で置き換える
     if(d.key==='⌫') form.amount = form.amount.slice(0,-1);
     else if(form.amount.length < 8){ form.amount = (form.amount + d.key).replace(/^0+/, ''); }
     if(sheetMode==='entry') updEntry(); else { document.getElementById('amt').innerHTML = amtText(form.amount)+'<small>円</small>'; }
@@ -767,6 +837,13 @@ document.addEventListener('click', ev=>{
       save(); closeSheet(); render(); break;
     }
     case 'incClear': delete data.incomes[state.period]; save(); closeSheet(); render(); break;
+    case 'savings': openSavings(); break;
+    case 'saving': openSaving(d.p); break;
+    case 'saveSaving': {
+      if(form.amount===''){ toast('金額を入力してください'); break; }
+      data.savings[form.period] = Number(form.amount); save(); render(); openSavings(); toast('貯金を記録しました'); break;
+    }
+    case 'savClear': delete data.savings[form.period]; save(); render(); openSavings(); break;
     case 'padd': {
       ask({msg:'追加する支払い方法の名前（例：交通系IC）', input:'', ok:'追加'}).then(n=>{ if(n && n.trim()){ data.payments.push({id:uid(), name:n.trim().slice(0,20)}); save(); render(); } });
       break;
