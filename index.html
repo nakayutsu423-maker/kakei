@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
 <!-- 外部への通信をすべて禁止（データ流出防止）。外部ファイル・フォント・解析ツールは一切読み込まない -->
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; connect-src 'none'; font-src 'none'; frame-src 'none'; object-src 'none'; form-action 'none'; base-uri 'none'">
 <meta name="referrer" content="no-referrer">
@@ -34,8 +34,8 @@
   --shadow:none; color-scheme:dark;
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-/* ダブルタップでの拡大を防ぐ（2本指での拡大は可能なまま） */
-html,body,button,input,textarea,.keys button{touch-action:manipulation}
+/* ダブルタップ・入力欄タップでの拡大を防ぐ（2本指での拡大は可能なまま）。記録画面のすき間をタップしたときも対象 */
+*,*::before,*::after{touch-action:manipulation}
 html,body{margin:0;background:var(--bg);color:var(--ink)}
 body{font-family:-apple-system,"Hiragino Sans","Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif;
   font-size:15px;line-height:1.5;padding-bottom:calc(84px + env(safe-area-inset-bottom, 0px));
